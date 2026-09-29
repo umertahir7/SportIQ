@@ -1,3 +1,15 @@
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+APP_DIR = Path(__file__).resolve().parent
+
+sys.path.insert(0, str(PROJECT_ROOT))
+sys.path = [
+    p for p in sys.path
+    if Path(p).resolve() != APP_DIR
+]
+
 import html
 from datetime import datetime
 
