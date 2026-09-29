@@ -9,7 +9,6 @@ sys.path = [
     p for p in sys.path
     if Path(p).resolve() != APP_DIR
 ]
-
 import html
 from datetime import datetime
 
@@ -658,14 +657,14 @@ with st.sidebar:
     st.html('<div class="sidebar-section">Workspace</div>')
 
     nav = [
-        ("🏠  Dashboard", "Dashboard"),
-        ("📅  Fixtures", "Fixtures"),
-        ("📊  Standings", "Standings"),
-        ("📡  Match Center", "Match Center"),
-        ("📰  News", "News"),
-        ("⭐  Watchlist", "Watchlist"),
-        ("👥  Squad", "Squad"),
-        ("🤖  AI Chat", "AI Chat"),
+        ("⌂  Dashboard", "Dashboard"),
+        ("▣  Fixtures", "Fixtures"),
+        ("☷  Standings", "Standings"),
+        ("◉  Match Center", "Match Center"),
+        ("▤  News", "News"),
+        ("☆  Watchlist", "Watchlist"),
+        ("♙  Squad", "Squad"),
+        ("✦  AI Chat", "AI Chat"),
     ]
     for label, page in nav:
         if st.button(label, use_container_width=True, key=f"nav_{page}"):
@@ -804,25 +803,17 @@ if st.session_state.page == "Dashboard":
             with cols[i % len(cols)]:
                 name = team.get("name")
                 country = team.get("country") or "Unknown country"
-                # Prefer a logo already present on the watchlist record, then
-                # fall back to BSD so dashboard cards still get real team crests.
-                logo = first_value(team, "logo", "logo_url", "team_logo", "team_logo_url")
-                if not logo:
-                    logo = get_team_logo(name)
+                logo = get_team_logo(name)
                 logo_html = render_logo(logo, 68, "⚽")
-                team_id = team.get("id", i)
-
                 st.html(
                     f'<div class="dashboard-team-card">'
-                    f'<div style="height:76px;display:flex;align-items:center;">{logo_html}</div>'
+                    f'{logo_html}'
                     f'<div class="dashboard-team-name">{esc(name)}</div>'
                     f'<div class="dashboard-team-meta">{esc(country)}</div>'
                     f'</div>'
                 )
-
-                # Keep the navigation as a clear link directly under the card.
-                with st.container(key=f"dashboard-card-team-{team_id}"):
-                    if st.button("Open Squad →", key=f"dashboard_team_{team_id}"):
+                with st.container(key=f"dashboard-card-team-{team.get('id', i)}"):
+                    if st.button("Open Squad →", key=f"dashboard_team_{team.get('id', i)}"):
                         st.session_state.squad_team = name
                         st.session_state.page = "Squad"
                         st.rerun()
