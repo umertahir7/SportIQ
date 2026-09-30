@@ -1793,6 +1793,20 @@ class AIService:
             )
         )
 
+        if isinstance(home_team, dict):
+            home_team = (
+                home_team.get("name")
+                or home_team.get("team_name")
+                or home_team.get("short_name")
+            )
+
+        if isinstance(away_team, dict):
+            away_team = (
+                away_team.get("name")
+                or away_team.get("team_name")
+                or away_team.get("short_name")
+            )
+
         if home_team is not None:
             compact[
                 "home_team"
@@ -1910,6 +1924,50 @@ class AIService:
             compact[
                 "incidents"
             ] = compact_incidents
+
+            # Keep a dedicated scorer list so the final answer model does
+            # not have to infer scorers from a large incident payload.
+            goal_scorers = []
+            for incident in compact_incidents:
+                incident_type = str(
+                    incident.get("incident_type")
+                    or incident.get("type")
+                    or incident.get("incident_class")
+                    or incident.get("incidentType")
+                    or incident.get("category")
+                    or ""
+                ).lower()
+                player = (
+                    incident.get("player_name")
+                    or incident.get("player")
+                )
+
+                is_goal = (
+                    "goal" in incident_type
+                    and "own" not in incident_type
+                    and "miss" not in incident_type
+                    and "penalty miss" not in incident_type
+                )
+
+                if not is_goal or not player:
+                    continue
+
+                if isinstance(player, dict):
+                    player = (
+                        player.get("name")
+                        or player.get("short_name")
+                        or player.get("player_name")
+                    )
+
+                if player:
+                    scorer = {"player": player}
+                    for key in ("minute", "added_time", "team_name", "is_home"):
+                        if incident.get(key) is not None:
+                            scorer[key] = incident[key]
+                    goal_scorers.append(scorer)
+
+            if goal_scorers:
+                compact["goal_scorers"] = goal_scorers
 
         # --------------------------------------------------------------
         # Lineups
@@ -2782,13 +2840,21 @@ class AIService:
             else:
                 results = results[:8]
 
-            return {
+            team_value = data.get("team")
+            if isinstance(team_value, dict):
+                # Team IDs are internal identifiers and should never be
+                # surfaced to the final answer model/user.
+                team_value = {
+                    key: value
+                    for key, value in team_value.items()
+                    if key not in {"id", "team_id"}
+                }
+
+            response = {
                 "status": data.get(
                     "status"
                 ),
-                "team": data.get(
-                    "team"
-                ),
+                "team": team_value,
                 "league_id": data.get(
                     "league_id"
                 ),
@@ -2801,6 +2867,20 @@ class AIService:
                 ),
                 "results": results,
             }
+
+            # get_team_results may already return the exact latest-match
+            # detail from BSD. Preserve it instead of dropping it during
+            # compaction; this is what carries incidents/scorers forward.
+            latest_details = data.get("latest_match_details")
+            if isinstance(latest_details, dict):
+                compact_latest_details = self._compact_match_details(
+                    latest_details,
+                    user_message,
+                )
+                if isinstance(compact_latest_details, dict):
+                    response["latest_match_details"] = compact_latest_details
+
+            return response
 
         # --------------------------------------------------------------
         # MATCH DETAILS
@@ -3166,9 +3246,11 @@ Rules:
 - If a detailed match response contains home_team, away_team,
   home_score, away_score, or score, use those fields when answering
   match-result questions.
-- For goal-scoring questions, only identify a player as a scorer when
-  the retrieved incident/event data explicitly identifies that player
-  as the scorer.
+- For goal-scoring questions, use the retrieved `goal_scorers` list when
+  present. Only identify a player as a scorer when the retrieved
+  incident/event data explicitly identifies that player as the scorer.
+- If `goal_scorers` is present, include the scorer names and minutes when
+  available. Do not omit them when the user explicitly asks who scored.
 - Do not infer a goal scorer merely from a player's name appearing
   elsewhere in the data.
 - For player participation questions, only say that a player played,
@@ -3718,6 +3800,12 @@ Give the most direct factual answer to the user's question.
         collected = {
             "get_team_results": compact_result
         }
+
+        # get_team_results can already contain BSD's detailed latest-match
+        # payload. Expose that compact detail directly to the final answer.
+        latest_details = compact_result.get("latest_match_details")
+        if isinstance(latest_details, dict):
+            collected["get_match_details"] = latest_details
 
         if match_details:
             detail_tool_name = (
