@@ -1,8 +1,12 @@
 import sys
+import base64
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 APP_DIR = Path(__file__).resolve().parent
+ASSETS_DIR = PROJECT_ROOT / "assets"
+SPORTIQ_LOGO_PATH = ASSETS_DIR / "sportiq_logo.png"
+SPORTIQ_ICON_PATH = ASSETS_DIR / "sportiq_icon.png"
 
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path = [
@@ -25,10 +29,22 @@ from app.services.kickoff_service import KickoffService
 
 st.set_page_config(
     page_title="SportIQ",
-    page_icon="↗",
+    page_icon="assets/sportiq_icon.png",
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+
+def image_data_uri(path):
+    try:
+        encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+        return f"data:image/png;base64,{encoded}"
+    except Exception:
+        return ""
+
+
+SPORTIQ_LOGO_URI = image_data_uri(SPORTIQ_LOGO_PATH)
+SPORTIQ_ICON_URI = image_data_uri(SPORTIQ_ICON_PATH)
 
 
 # =========================================================
@@ -49,27 +65,13 @@ st.html(
     [data-testid="stSidebar"] { background:#0d111a; border-right:1px solid #1d2633; }
     [data-testid="stSidebar"] > div:first-child { padding-top:1.5rem; }
 
-    .brand-mark {
-        width:34px; height:34px; border-radius:11px;
-        position:relative; display:inline-flex; align-items:center; justify-content:center;
-        background:linear-gradient(145deg,#1e3a5f,#101827);
+    .brand-logo {
+        width:34px; height:34px; border-radius:10px;
+        display:inline-block; object-fit:cover; object-position:center;
+        margin-right:9px; vertical-align:middle;
         border:1px solid #315579;
         box-shadow:0 8px 24px rgba(37,99,235,.18);
-        margin-right:9px; vertical-align:middle; overflow:hidden;
     }
-    .brand-mark:before {
-        content:""; width:10px; height:10px; border-radius:50%;
-        background:#e2e8f0; border:2px solid #94a3b8;
-        position:absolute; left:8px; bottom:7px;
-        box-shadow:0 0 0 2px rgba(96,165,250,.10);
-    }
-    .brand-mark:after {
-        content:""; width:16px; height:8px;
-        border-top:2px solid #60a5fa; border-right:2px solid transparent;
-        border-radius:50%; transform:rotate(-28deg);
-        position:absolute; right:3px; top:7px;
-    }
-    .brand-mark span { display:none; }
     .sportiq-brand { font-size:26px; font-weight:800; color:#fff; margin-bottom:2px; }
     .sportiq-subtitle { font-size:12px; color:#7f8da3; margin-bottom:25px; }
     .sidebar-footer { margin-top:35px; padding-top:15px; border-top:1px solid #202733; font-size:11px; color:#586579; line-height:1.6; }
@@ -350,7 +352,7 @@ def get_live_matches(user_id):
 
 
 def get_bsd_live_match_details(event_id):
-    """Fetch uncached BSD match details for live monitoring."""
+    """Fetch uncached match details for live monitoring."""
     return get_football_service().get_bsd_match_details(int(event_id))
 
 
@@ -617,9 +619,9 @@ for key, default in {
 
 if st.session_state.user_id is None:
     st.html(
-        """
+        f"""
         <div style="max-width:700px;margin:105px auto 32px;text-align:center;">
-            <div style="display:inline-flex;align-items:center;justify-content:center;width:72px;height:72px;border-radius:22px;background:linear-gradient(145deg,#17253a,#0f1725);border:1px solid #29405d;box-shadow:0 18px 45px rgba(0,0,0,.25);font-size:26px;margin-bottom:22px;"><span class="brand-mark" style="width:48px;height:48px;margin:0;"></span></div>
+            <div style="display:inline-flex;align-items:center;justify-content:center;width:110px;height:110px;border-radius:26px;background:#080b12;border:1px solid #29405d;box-shadow:0 18px 45px rgba(0,0,0,.25);margin-bottom:22px;overflow:hidden;"><img src="{SPORTIQ_LOGO_URI}" style="width:100%;height:100%;object-fit:cover;" alt="SportIQ logo"></div>
             <div style="font-size:46px;font-weight:800;color:#fff;letter-spacing:-1.8px;">Welcome to SportIQ</div>
             <div style="margin-top:11px;color:#8190a5;font-size:15px;">Your personal football intelligence workspace.</div>
             <div style="margin:20px auto 0;max-width:520px;color:#64748b;font-size:12px;line-height:1.7;">Follow your teams, explore fixtures and squads, track matches, read news, and ask the AI about your football world.</div>
@@ -637,7 +639,7 @@ if st.session_state.user_id is None:
             st.session_state.username = user["username"]
             st.rerun()
     st.stop()
-
+    
 
 user_id = st.session_state.user_id
 username = st.session_state.username
@@ -653,7 +655,7 @@ elif st.session_state.next_fixture_team_index >= len(teams):
 # =========================================================
 
 with st.sidebar:
-    st.html('<div class="sportiq-brand"><span class="brand-mark"></span>SportIQ</div><div class="sportiq-subtitle">Football Intelligence, built around you</div>')
+    st.html(f'<div class="sportiq-brand"><img class="brand-logo" src="{SPORTIQ_ICON_URI}" alt="SportIQ logo">SportIQ</div><div class="sportiq-subtitle">Football Intelligence, built around you</div>')
     st.html('<div class="sidebar-section">Workspace</div>')
 
     nav = [
@@ -679,7 +681,7 @@ with st.sidebar:
             if logo:
                 st.html(f'<div class="sidebar-team"><img class="sidebar-team-logo" src="{esc(logo)}"><span>{esc(name)}</span></div>')
             else:
-                st.html(f'<div class="sidebar-team"><span><span class="brand-mark" style="width:24px;height:24px;margin:0;"></span><span>{esc(name)}</span></div>')
+                st.html(f'<div class="sidebar-team"><span><img class="brand-logo" src="{SPORTIQ_ICON_URI}" style="width:24px;height:24px;margin:0;border-radius:7px;vertical-align:middle;" alt="SportIQ logo"></span><span>{esc(name)}</span></div>')
     else:
         st.caption("No teams added yet.")
 
@@ -886,7 +888,7 @@ elif st.session_state.page == "Standings":
             else:
                 league_name = result.get("league_name") or "League standings"
                 season_id = result.get("season_id")
-                st.html(f'<div class="section-title">{esc(league_name)}</div><div class="muted">Season: {esc(season_id or "Current")}</div>')
+                st.html(f'<div class="section-title">{esc(league_name)}</div>')
                 render_standings(result)
 
 
@@ -895,7 +897,7 @@ elif st.session_state.page == "Standings":
 # =========================================================
 
 def render_match_center(user_id):
-    st.html('<div class="page-header"><div class="page-header-title">Match Center</div><div class="page-header-subtitle">Your selected favourite team’s next match, powered by BSD. The match state refreshes automatically.</div></div>')
+    st.html('<div class="page-header"><div class="page-header-title">Match Center</div><div class="page-header-subtitle">Your selected favourite team’s next match. The match state refreshes automatically.</div></div>')
 
     if not teams:
         st.info("Add a team to your watchlist to use Match Center.")
@@ -946,7 +948,7 @@ def render_match_center(user_id):
         f'<div class="muted">{esc(fixture.get("local_date") or match_date)} • {esc(fixture.get("local_time") or "Time unavailable")}</div></div>'
     )
 
-    st.caption("🟢 BSD match state refreshes every 15 seconds while this page remains open.")
+    st.caption("🟢 Match state refreshes every 15 seconds while this page remains open.")
 
     # Prefer the event ID already returned by the next-fixture tool. This
     # keeps Match Center tied directly to the user's next match instead of
@@ -978,7 +980,7 @@ def render_match_center(user_id):
         event_id = first_value(discovery, "event_id", "id")
 
     if event_id is None:
-        st.error("The next match was found, but BSD did not return an event ID.")
+        st.error("The next match was found, but it did not return an event ID.")
         return
 
     # Broadcasts and social are separate lookups.  They must not depend on
@@ -1008,9 +1010,9 @@ def render_match_center(user_id):
 
     if not isinstance(detail, dict) or not detail or detail.get("error"):
         st.error(
-            detail.get("error", "Could not retrieve the BSD match details.")
+            detail.get("error", "Could not retrieve the  match details.")
             if isinstance(detail, dict)
-            else "Unexpected BSD response."
+            else "Unexpected response."
         )
         return
     home_data = detail.get("home_team") if isinstance(detail.get("home_team"), dict) else {}
@@ -1133,7 +1135,7 @@ def render_match_center(user_id):
                     atxt = f"{av}{suffix}" if av is not None else "—"
                     st.html(f'<div class="stats-row"><div style="font-weight:700;color:#fff;">{esc(htxt)}</div><div style="text-align:center;color:#8190a5;font-size:12px;">{esc(label)}</div><div style="text-align:right;font-weight:700;color:#fff;">{esc(atxt)}</div></div>')
             else:
-                st.info("BSD has not returned displayable statistics yet.")
+                st.info("No displayable statistics yet.")
         else:
             st.info("No live statistics are currently available.")
 
