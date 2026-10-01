@@ -29,7 +29,7 @@ from app.services.kickoff_service import KickoffService
 
 st.set_page_config(
     page_title="SportIQ",
-    page_icon=str(SPORTIQ_ICON_PATH) if SPORTIQ_ICON_PATH.exists() else "⚽",
+    page_icon=str(SPORTIQ_ICON_PATH),
     layout="wide",
     initial_sidebar_state="expanded",
 )
