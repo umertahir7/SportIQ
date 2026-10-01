@@ -1719,6 +1719,104 @@ class AIService:
 
         return normalized
 
+    @staticmethod
+    def _normalize_entity_name(value):
+        """Normalize team/entity names for reliable incident attribution."""
+        if isinstance(value, dict):
+            value = (
+                value.get("name")
+                or value.get("team_name")
+                or value.get("short_name")
+            )
+        if value is None:
+            return ""
+        text = str(value).strip().lower()
+        text = text.replace("–", "-").replace("—", "-")
+        text = re.sub(r"[^a-z0-9]+", " ", text)
+        return re.sub(r"\s+", " ", text).strip()
+
+    def _incident_belongs_to_team(
+        self,
+        incident,
+        target_team,
+        home_team,
+        away_team,
+    ):
+        """
+        Determine whether a match incident belongs to the requested team.
+
+        BSD can identify the incident team either by team/team_name or by
+        is_home. We only accept a scorer when one of those signals can be
+        matched to the requested team; this prevents the opponent's scorers
+        from being reported as the requested team's scorers.
+        """
+        if not target_team:
+            return False
+
+        target_norm = self._normalize_entity_name(target_team)
+        home_norm = self._normalize_entity_name(home_team)
+        away_norm = self._normalize_entity_name(away_team)
+
+        incident_team = incident.get("team_name") or incident.get("team")
+        incident_team_norm = self._normalize_entity_name(incident_team)
+
+        if incident_team_norm:
+            if incident_team_norm == target_norm:
+                return True
+
+            # Allow a short/expanded BSD name to match the same team.
+            if (
+                target_norm in incident_team_norm
+                or incident_team_norm in target_norm
+            ):
+                return True
+
+            return False
+
+        is_home = incident.get("is_home")
+        if isinstance(is_home, str):
+            lowered = is_home.strip().lower()
+            if lowered in {"true", "1", "yes", "home"}:
+                is_home = True
+            elif lowered in {"false", "0", "no", "away"}:
+                is_home = False
+            else:
+                is_home = None
+
+        if is_home is True and home_norm:
+            return home_norm == target_norm or target_norm in home_norm or home_norm in target_norm
+
+        if is_home is False and away_norm:
+            return away_norm == target_norm or target_norm in away_norm or away_norm in target_norm
+
+        # No reliable team attribution: do not guess.
+        return False
+
+    def _extract_requested_result_count(self, user_message):
+        """Return an explicit 'last N games/matches' count, if present."""
+        text = (user_message or "").lower()
+        match = re.search(
+            r"\b(?:last|past|previous)\s+(\d+)\s+(?:games?|matches?|results?)\b",
+            text,
+        )
+        if match:
+            return max(1, min(int(match.group(1)), 5))
+
+        word_counts = {
+            "two": 2,
+            "three": 3,
+            "four": 4,
+            "five": 5,
+        }
+        for word, count in word_counts.items():
+            if re.search(
+                rf"\b(?:last|past|previous)\s+{word}\s+(?:games?|matches?|results?)\b",
+                text,
+            ):
+                return count
+
+        return None
+
     def _compact_match_details(
         self,
         data,
@@ -1763,17 +1861,6 @@ class AIService:
         # --------------------------------------------------------------
         # Match ID
         # --------------------------------------------------------------
-
-        fixture_id = (
-            self._extract_fixture_id(
-                source
-            )
-        )
-
-        if fixture_id is not None:
-            compact[
-                "fixture_id"
-            ] = fixture_id
 
         # --------------------------------------------------------------
         # Teams
@@ -1927,7 +2014,11 @@ class AIService:
 
             # Keep a dedicated scorer list so the final answer model does
             # not have to infer scorers from a large incident payload.
+            # IMPORTANT: only keep scorers who belong to the team asked
+            # about. BSD incident feeds can contain goals for both sides.
             goal_scorers = []
+            target_team = self._infer_team_name(user_message or "", [])
+
             for incident in compact_incidents:
                 incident_type = str(
                     incident.get("incident_type")
@@ -1959,12 +2050,22 @@ class AIService:
                         or player.get("player_name")
                     )
 
-                if player:
-                    scorer = {"player": player}
-                    for key in ("minute", "added_time", "team_name", "is_home"):
-                        if incident.get(key) is not None:
-                            scorer[key] = incident[key]
-                    goal_scorers.append(scorer)
+                if not player:
+                    continue
+
+                if not self._incident_belongs_to_team(
+                    incident,
+                    target_team,
+                    home_team,
+                    away_team,
+                ):
+                    continue
+
+                scorer = {"player": player}
+                for key in ("minute", "added_time"):
+                    if incident.get(key) is not None:
+                        scorer[key] = incident[key]
+                goal_scorers.append(scorer)
 
             if goal_scorers:
                 compact["goal_scorers"] = goal_scorers
@@ -2282,6 +2383,58 @@ class AIService:
             raw_detail,
             user_message,
         )
+
+    def _retrieve_match_details_for_results(
+        self,
+        user_message,
+        compact_result,
+        max_matches=5,
+    ):
+        """
+        Retrieve details for multiple recent matches when the user asks for
+        scorers/events across a range such as "last 5 games and scorers".
+        """
+        if not self._needs_match_details(user_message):
+            return []
+
+        requested_count = self._extract_requested_result_count(user_message)
+        if requested_count is None:
+            return []
+
+        results = compact_result.get("results", []) if isinstance(compact_result, dict) else []
+        if not isinstance(results, list):
+            return []
+
+        tool_name = self._get_match_detail_tool_name()
+        if not tool_name:
+            return []
+
+        details = []
+        for match in results[: min(requested_count, max_matches)]:
+            if not isinstance(match, dict):
+                continue
+
+            fixture_id = self._extract_fixture_id(match)
+            if fixture_id is None:
+                continue
+
+            arguments = self._build_match_detail_arguments(
+                tool_name,
+                fixture_id,
+                user_message,
+            )
+            raw_detail = self._execute_mcp_tool(tool_name, arguments)
+            if not isinstance(raw_detail, dict) or raw_detail.get("status") == "error":
+                continue
+
+            compact_detail = self._compact_match_details(
+                raw_detail,
+                user_message,
+            )
+            if isinstance(compact_detail, dict):
+                details.append((fixture_id, compact_detail))
+
+        return details
 
     # ------------------------------------------------------------------
     # TOOL RESULT COMPACTION
@@ -3256,6 +3409,7 @@ Rules:
 - For player participation questions, only say that a player played,
   started, was substituted, or was an unused substitute when the
   retrieved lineup/incident data supports it.
+- Never mention internal IDs such as fixture_id, event_id, match_id, team_id, league_id, or season_id unless the user explicitly asks for an ID.
 - Keep the answer concise.
 - For a match-summary question, mention teams, score, competition,
   date, and result when available.
@@ -3786,8 +3940,9 @@ Give the most direct factual answer to the user's question.
             )
 
         # --------------------------------------------------------------
-        # If this is a scorer/lineup/event question, retrieve exactly
-        # one detailed match.
+        # If this is a scorer/lineup/event question, retrieve detailed
+        # match data. For "last N" queries, retrieve each requested
+        # match instead of only the latest one.
         # --------------------------------------------------------------
 
         match_details = (
@@ -3796,6 +3951,35 @@ Give the most direct factual answer to the user's question.
                 compact_result,
             )
         )
+
+        multi_match_details = self._retrieve_match_details_for_results(
+            user_message,
+            compact_result,
+            max_matches=5,
+        )
+
+        if multi_match_details:
+            details_by_fixture = {
+                str(fixture_id): detail
+                for fixture_id, detail in multi_match_details
+            }
+            enriched_results = []
+            for match in compact_result.get("results", []):
+                if not isinstance(match, dict):
+                    enriched_results.append(match)
+                    continue
+
+                enriched = dict(match)
+                fixture_id = self._extract_fixture_id(match)
+                detail = details_by_fixture.get(str(fixture_id)) if fixture_id is not None else None
+                if isinstance(detail, dict):
+                    scorers = detail.get("goal_scorers")
+                    if scorers:
+                        enriched["goal_scorers"] = scorers
+                enriched_results.append(enriched)
+
+            compact_result = dict(compact_result)
+            compact_result["results"] = enriched_results
 
         collected = {
             "get_team_results": compact_result

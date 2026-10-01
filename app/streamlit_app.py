@@ -29,22 +29,10 @@ from app.services.kickoff_service import KickoffService
 
 st.set_page_config(
     page_title="SportIQ",
-    page_icon="assets/sportiq_icon.png",
+    page_icon=str(SPORTIQ_ICON_PATH) if SPORTIQ_ICON_PATH.exists() else "⚽",
     layout="wide",
     initial_sidebar_state="expanded",
 )
-
-
-def image_data_uri(path):
-    try:
-        encoded = base64.b64encode(path.read_bytes()).decode("ascii")
-        return f"data:image/png;base64,{encoded}"
-    except Exception:
-        return ""
-
-
-SPORTIQ_LOGO_URI = image_data_uri(SPORTIQ_LOGO_PATH)
-SPORTIQ_ICON_URI = image_data_uri(SPORTIQ_ICON_PATH)
 
 
 # =========================================================
@@ -65,15 +53,28 @@ st.html(
     [data-testid="stSidebar"] { background:#0d111a; border-right:1px solid #1d2633; }
     [data-testid="stSidebar"] > div:first-child { padding-top:1.5rem; }
 
-    .brand-logo {
-        width:34px; height:34px; border-radius:10px;
-        display:inline-block; object-fit:cover; object-position:center;
-        margin-right:9px; vertical-align:middle;
+    .brand-mark {
+        width:34px; height:34px; border-radius:11px;
+        position:relative; display:inline-flex; align-items:center; justify-content:center;
+        background:linear-gradient(145deg,#1e3a5f,#101827);
         border:1px solid #315579;
         box-shadow:0 8px 24px rgba(37,99,235,.18);
+        margin-right:9px; vertical-align:middle; overflow:hidden;
     }
-    .sportiq-brand { font-size:26px; font-weight:800; color:#fff; margin-bottom:2px; }
+    .sportiq-brand {
+        display:flex; align-items:center; gap:10px;
+        font-size:26px; font-weight:800; color:#fff; margin-bottom:2px;
+    }
+    .sportiq-logo {
+        width:34px; height:34px; flex:0 0 34px; display:block;
+        filter:drop-shadow(0 8px 18px rgba(37,99,235,.20));
+    }
     .sportiq-subtitle { font-size:12px; color:#7f8da3; margin-bottom:25px; }
+    .login-logo { width:72px; height:72px; object-fit:contain; display:block; margin:0 auto 22px; filter:drop-shadow(0 18px 35px rgba(0,0,0,.25)); }
+    .login-error-card { max-width:460px; margin:12px auto 0; padding:11px 14px; border-radius:10px; border:1px solid #5b2930; background:#241419; color:#fca5a5; font-size:12px; text-align:left; }
+    .fixture-error-card { background:#241419; border:1px solid #5b2930; border-radius:14px; padding:16px 18px; margin:8px 0 16px; color:#fca5a5; }
+    .fixture-error-title { font-size:13px; font-weight:800; color:#fecaca; margin-bottom:5px; }
+    .fixture-error-text { font-size:12px; line-height:1.6; color:#fca5a5; }
     .sidebar-footer { margin-top:35px; padding-top:15px; border-top:1px solid #202733; font-size:11px; color:#586579; line-height:1.6; }
     .sidebar-team { display:flex; align-items:center; gap:10px; background:#131a25; border:1px solid #202a38; border-radius:10px; padding:8px 10px; margin-bottom:7px; color:#dce4ef; font-size:13px; }
     .sidebar-team-logo { width:30px; height:30px; object-fit:contain; flex-shrink:0; }
@@ -352,7 +353,7 @@ def get_live_matches(user_id):
 
 
 def get_bsd_live_match_details(event_id):
-    """Fetch uncached match details for live monitoring."""
+    """Fetch uncached BSD match details for live monitoring."""
     return get_football_service().get_bsd_match_details(int(event_id))
 
 
@@ -406,6 +407,26 @@ def render_logo(url, size=72, fallback="◇"):
     if url:
         return f'<img src="{esc(url)}" style="width:{size}px;height:{size}px;object-fit:contain;" alt="team logo">'
     return f'<div style="width:{size}px;height:{size}px;display:flex;align-items:center;justify-content:center;font-size:{max(28, size//2)}px;">{fallback}</div>'
+
+
+def asset_data_uri(path):
+    """Return a local asset as a browser-safe data URI for st.html."""
+    try:
+        path = Path(path)
+        if not path.exists():
+            return ""
+        encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+        mime = {
+            ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+            ".webp": "image/webp", ".svg": "image/svg+xml",
+        }.get(path.suffix.lower(), "application/octet-stream")
+        return f"data:{mime};base64,{encoded}"
+    except Exception:
+        return ""
+
+
+SPORTIQ_LOGO_DATA_URI = asset_data_uri(SPORTIQ_LOGO_PATH)
+SPORTIQ_ICON_DATA_URI = asset_data_uri(SPORTIQ_ICON_PATH)
 
 
 def render_fixture_card(fixture, label="UPCOMING FIXTURE", show_monitor=False, user_id=None):
@@ -605,6 +626,7 @@ for key, default in {
     "watchlist_search_results": None,
     "watchlist_search_query": "",
     "next_fixture_team_index": 0,
+    "next_news_team_index": 0,
     "chat_messages": [],
     "match_center_team": None,
     "squad_team": None,
@@ -618,36 +640,47 @@ for key, default in {
 # =========================================================
 
 if st.session_state.user_id is None:
+    login_logo = SPORTIQ_LOGO_DATA_URI or SPORTIQ_ICON_DATA_URI
+    logo_html = (
+        f'<img class="login-logo" src="{esc(login_logo)}" alt="SportIQ">'
+        if login_logo
+        else '<div class="login-logo brand-mark" style="height:72px;"></div>'
+    )
     st.html(
         f"""
         <div style="max-width:700px;margin:105px auto 32px;text-align:center;">
-            <div style="display:inline-flex;align-items:center;justify-content:center;width:110px;height:110px;border-radius:26px;background:#080b12;border:1px solid #29405d;box-shadow:0 18px 45px rgba(0,0,0,.25);margin-bottom:22px;overflow:hidden;"><img src="{SPORTIQ_LOGO_URI}" style="width:100%;height:100%;object-fit:cover;" alt="SportIQ logo"></div>
+            {logo_html}
             <div style="font-size:46px;font-weight:800;color:#fff;letter-spacing:-1.8px;">Welcome to SportIQ</div>
             <div style="margin-top:11px;color:#8190a5;font-size:15px;">Your personal football intelligence workspace.</div>
             <div style="margin:20px auto 0;max-width:520px;color:#64748b;font-size:12px;line-height:1.7;">Follow your teams, explore fixtures and squads, track matches, read news, and ask the AI about your football world.</div>
         </div>
         """
     )
-    username = st.text_input("What's your username?", placeholder="Enter your username")
-    if st.button("Continue", type="primary", use_container_width=True):
-        username = username.strip()
-        if not username:
-            st.error("Please enter a username.")
-        else:
-            user = get_database().get_or_create_user(username)
-            st.session_state.user_id = user["id"]
-            st.session_state.username = user["username"]
-            st.rerun()
+    left, input_col, right = st.columns([1, 2.4, 1])
+    with input_col:
+        username = st.text_input("What's your username?", placeholder="Enter your username", key="login_username")
+        if st.button("Continue", type="primary", use_container_width=True, key="login_continue"):
+            username = username.strip()
+            if not username:
+                st.html('<div class="login-error-card">Please enter a username.</div>')
+            else:
+                user = get_database().get_or_create_user(username)
+                st.session_state.user_id = user["id"]
+                st.session_state.username = user["username"]
+                st.rerun()
     st.stop()
-    
 
 user_id = st.session_state.user_id
 username = st.session_state.username
 teams = get_watchlist(user_id)
 if not teams:
     st.session_state.next_fixture_team_index = 0
-elif st.session_state.next_fixture_team_index >= len(teams):
-    st.session_state.next_fixture_team_index = 0
+    st.session_state.next_news_team_index = 0
+else:
+    if st.session_state.next_fixture_team_index >= len(teams):
+        st.session_state.next_fixture_team_index = 0
+    if st.session_state.next_news_team_index >= len(teams):
+        st.session_state.next_news_team_index = 0
 
 
 # =========================================================
@@ -655,7 +688,16 @@ elif st.session_state.next_fixture_team_index >= len(teams):
 # =========================================================
 
 with st.sidebar:
-    st.html(f'<div class="sportiq-brand"><img class="brand-logo" src="{SPORTIQ_ICON_URI}" alt="SportIQ logo">SportIQ</div><div class="sportiq-subtitle">Football Intelligence, built around you</div>')
+    sidebar_logo = SPORTIQ_LOGO_DATA_URI or SPORTIQ_ICON_DATA_URI
+    sidebar_logo_html = (
+        f'<img class="sportiq-logo" src="{esc(sidebar_logo)}" alt="SportIQ">'
+        if sidebar_logo
+        else '<span class="brand-mark" style="width:34px;height:34px;margin:0;"></span>'
+    )
+    st.html(
+        f'<div class="sportiq-brand">{sidebar_logo_html}<span>SportIQ</span></div>'
+        '<div class="sportiq-subtitle">Football Intelligence, built around you</div>'
+    )
     st.html('<div class="sidebar-section">Workspace</div>')
 
     nav = [
@@ -681,7 +723,7 @@ with st.sidebar:
             if logo:
                 st.html(f'<div class="sidebar-team"><img class="sidebar-team-logo" src="{esc(logo)}"><span>{esc(name)}</span></div>')
             else:
-                st.html(f'<div class="sidebar-team"><span><img class="brand-logo" src="{SPORTIQ_ICON_URI}" style="width:24px;height:24px;margin:0;border-radius:7px;vertical-align:middle;" alt="SportIQ logo"></span><span>{esc(name)}</span></div>')
+                st.html(f'<div class="sidebar-team"><span><span class="brand-mark" style="width:24px;height:24px;margin:0;"></span><span>{esc(name)}</span></div>')
     else:
         st.caption("No teams added yet.")
 
@@ -832,38 +874,76 @@ elif st.session_state.page == "Fixtures":
     if not teams:
         st.info("Your watchlist is empty.")
     else:
-        for team in teams:
-            team_name = team.get("name")
-            st.html(f'<div class="section-title">{esc(team_name)}</div>')
-            try:
-                result = execute_mcp_tool(user_id, "get_upcoming_matches", {"team_name": team_name})
-            except Exception as error:
-                st.error(f"Could not load fixtures for {team_name}: {error}")
-                continue
-            fixtures = result.get("fixtures", []) if isinstance(result, dict) and result.get("status") == "success" else []
-            if not fixtures:
-                st.info(f"No upcoming fixtures are currently available for {team_name}.")
-                continue
-            for fixture_index, fixture in enumerate(fixtures):
-                event_id = render_fixture_card(fixture)
-                event_id = event_id or first_value(fixture, "event_id", "id")
-                if event_id:
-                    with st.expander("📺 Broadcasts & social", expanded=False):
-                        bcol, scol = st.columns(2)
-                        with bcol:
-                            st.markdown("#### 📺 TV / Broadcast")
-                            try:
-                                b = get_match_broadcasts(user_id, event_id)
-                                render_broadcasts(b.get("broadcasts", []) if isinstance(b, dict) else [])
-                            except Exception as error:
-                                st.error(f"Broadcast lookup failed: {error}")
-                        with scol:
-                            st.markdown("#### 📱 Match social")
-                            try:
-                                s = get_match_social(user_id, event_id, 5)
-                                render_social_items(s.get("social", []) if isinstance(s, dict) else [], "Social")
-                            except Exception as error:
-                                st.error(f"Social lookup failed: {error}")
+        # Show one followed team at a time, with arrows to switch teams.
+        current_index = st.session_state.next_fixture_team_index % len(teams)
+        current_team = teams[current_index]
+        team_name = current_team.get("name")
+
+        left_arrow, team_col, right_arrow = st.columns([1, 6, 1])
+        with left_arrow:
+            if st.button("←", key="fixture_team_prev", use_container_width=True):
+                st.session_state.next_fixture_team_index = (current_index - 1) % len(teams)
+                st.rerun()
+        with team_col:
+            logo = get_team_logo(team_name)
+            logo_html = render_logo(logo, 42) if logo else ""
+            st.html(
+                f'<div style="display:flex;align-items:center;justify-content:center;gap:12px;margin:4px 0 18px;">'
+                f'{logo_html}<div class="section-title" style="margin:0;text-align:center;">{esc(team_name)}</div>'
+                f'</div>'
+            )
+        with right_arrow:
+            if st.button("→", key="fixture_team_next", use_container_width=True):
+                st.session_state.next_fixture_team_index = (current_index + 1) % len(teams)
+                st.rerun()
+
+        try:
+            result = execute_mcp_tool(user_id, "get_upcoming_matches", {"team_name": team_name})
+        except Exception:
+            st.html(
+                f'<div class="fixture-error-card">'
+                f'<div class="fixture-error-title">Fixtures temporarily unavailable</div>'
+                f'<div class="fixture-error-text">Could not load upcoming fixtures for {esc(team_name)}. Please try again in a moment.</div>'
+                f'</div>'
+            )
+        else:
+            if not isinstance(result, dict) or result.get("status") != "success":
+                error_message = (
+                    (result.get("error") or result.get("message") or "The fixture service returned an unexpected response.")
+                    if isinstance(result, dict)
+                    else "The fixture service returned an unexpected response."
+                )
+                st.html(
+                    f'<div class="fixture-error-card">'
+                    f'<div class="fixture-error-title">Fixtures temporarily unavailable</div>'
+                    f'<div class="fixture-error-text">{esc(error_message)}</div>'
+                    f'</div>'
+                )
+            else:
+                fixtures = result.get("fixtures", [])
+                if not fixtures:
+                    st.info(f"No upcoming fixtures are currently available for {team_name}.")
+                else:
+                    for fixture_index, fixture in enumerate(fixtures):
+                        event_id = render_fixture_card(fixture)
+                        event_id = event_id or first_value(fixture, "event_id", "id")
+                        if event_id:
+                            with st.expander("📺 Broadcasts & social", expanded=False):
+                                bcol, scol = st.columns(2)
+                                with bcol:
+                                    st.markdown("#### 📺 TV / Broadcast")
+                                    try:
+                                        b = get_match_broadcasts(user_id, event_id)
+                                        render_broadcasts(b.get("broadcasts", []) if isinstance(b, dict) else [])
+                                    except Exception as error:
+                                        st.error(f"Broadcast lookup failed: {error}")
+                                with scol:
+                                    st.markdown("#### 📱 Match social")
+                                    try:
+                                        s = get_match_social(user_id, event_id, 5)
+                                        render_social_items(s.get("social", []) if isinstance(s, dict) else [], "Social")
+                                    except Exception as error:
+                                        st.error(f"Social lookup failed: {error}")
 
 
 # =========================================================
@@ -888,7 +968,21 @@ elif st.session_state.page == "Standings":
             else:
                 league_name = result.get("league_name") or "League standings"
                 season_id = result.get("season_id")
-                st.html(f'<div class="section-title">{esc(league_name)}</div>')
+                league_id = result.get("league_id")
+                league_logo = None
+                if league_id is not None:
+                    try:
+                        league_logo = get_football_service().get_bsd_league_logo(int(league_id))
+                    except Exception:
+                        league_logo = None
+
+                league_logo_html = render_logo(league_logo, 42, "🏆") if league_logo else ""
+                st.html(
+                    f'<div style="display:flex;align-items:center;gap:12px;margin:10px 0 4px;">'
+                    f'{league_logo_html}'
+                    f'<div><div class="section-title" style="margin:0;">{esc(league_name)}</div>'
+                   
+                )
                 render_standings(result)
 
 
@@ -897,7 +991,7 @@ elif st.session_state.page == "Standings":
 # =========================================================
 
 def render_match_center(user_id):
-    st.html('<div class="page-header"><div class="page-header-title">Match Center</div><div class="page-header-subtitle">Your selected favourite team’s next match. The match state refreshes automatically.</div></div>')
+    st.html('<div class="page-header"><div class="page-header-title">Match Center</div><div class="page-header-subtitle">Your selected favourite team’s next match, powered by BSD. The match state refreshes automatically.</div></div>')
 
     if not teams:
         st.info("Add a team to your watchlist to use Match Center.")
@@ -948,7 +1042,7 @@ def render_match_center(user_id):
         f'<div class="muted">{esc(fixture.get("local_date") or match_date)} • {esc(fixture.get("local_time") or "Time unavailable")}</div></div>'
     )
 
-    st.caption("🟢 Match state refreshes every 15 seconds while this page remains open.")
+    st.caption("🟢 BSD match state refreshes every 15 seconds while this page remains open.")
 
     # Prefer the event ID already returned by the next-fixture tool. This
     # keeps Match Center tied directly to the user's next match instead of
@@ -980,7 +1074,7 @@ def render_match_center(user_id):
         event_id = first_value(discovery, "event_id", "id")
 
     if event_id is None:
-        st.error("The next match was found, but it did not return an event ID.")
+        st.error("The next match was found, but BSD did not return an event ID.")
         return
 
     # Broadcasts and social are separate lookups.  They must not depend on
@@ -1010,9 +1104,9 @@ def render_match_center(user_id):
 
     if not isinstance(detail, dict) or not detail or detail.get("error"):
         st.error(
-            detail.get("error", "Could not retrieve the  match details.")
+            detail.get("error", "Could not retrieve the BSD match details.")
             if isinstance(detail, dict)
-            else "Unexpected response."
+            else "Unexpected BSD response."
         )
         return
     home_data = detail.get("home_team") if isinstance(detail.get("home_team"), dict) else {}
@@ -1059,7 +1153,7 @@ def render_match_center(user_id):
         <div class="monitor-card">
             <div style="display:flex;align-items:center;justify-content:center;gap:8px;" class="tiny">
                 {competition_badge}
-                <span>EVENT {esc(event_id)} • {esc(competition)}</span>
+                <span>{esc(competition)}</span>
             </div>
             <div style="display:flex;align-items:center;justify-content:center;gap:24px;margin:25px 0 15px;">
                 <div style="flex:1;text-align:right;">
@@ -1135,7 +1229,7 @@ def render_match_center(user_id):
                     atxt = f"{av}{suffix}" if av is not None else "—"
                     st.html(f'<div class="stats-row"><div style="font-weight:700;color:#fff;">{esc(htxt)}</div><div style="text-align:center;color:#8190a5;font-size:12px;">{esc(label)}</div><div style="text-align:right;font-weight:700;color:#fff;">{esc(atxt)}</div></div>')
             else:
-                st.info("No displayable statistics yet.")
+                st.info("BSD has not returned displayable statistics yet.")
         else:
             st.info("No live statistics are currently available.")
 
@@ -1167,39 +1261,67 @@ elif st.session_state.page == "News":
     if not teams:
         st.info("Your watchlist is empty.")
     else:
-        for team in teams:
-            name = team.get("name")
-            st.html(f'<div class="section-title">📰 {esc(name)}</div>')
-            try:
-                result = get_team_news(user_id, name)
-            except Exception as error:
-                st.error(f"Could not load news for {name}: {error}")
-                continue
+        # Keep the News page focused on one followed team at a time.
+        current_index = st.session_state.next_news_team_index % len(teams)
+        current_team = teams[current_index]
+        name = current_team.get("name")
+
+        left_arrow, team_col, right_arrow = st.columns([1, 6, 1])
+        with left_arrow:
+            if st.button("←", key="news_team_prev", use_container_width=True):
+                st.session_state.next_news_team_index = (current_index - 1) % len(teams)
+                st.rerun()
+        with team_col:
+            logo = get_team_logo(name)
+            logo_html = render_logo(logo, 42) if logo else ""
+            st.html(
+                f'<div style="display:flex;align-items:center;justify-content:center;gap:12px;margin:4px 0 18px;">'
+                f'{logo_html}<div class="section-title" style="margin:0;text-align:center;">{esc(name)}</div>'
+                f'</div>'
+            )
+        with right_arrow:
+            if st.button("→", key="news_team_next", use_container_width=True):
+                st.session_state.next_news_team_index = (current_index + 1) % len(teams)
+                st.rerun()
+
+        try:
+            result = get_team_news(user_id, name)
+        except Exception:
+            st.html(
+                f'<div class="fixture-error-card">'
+                f'<div class="fixture-error-title">News temporarily unavailable</div>'
+                f'<div class="fixture-error-text">Could not load recent news for {esc(name)}. Please try again in a moment.</div>'
+                f'</div>'
+            )
+        else:
             articles = result.get("articles", []) if isinstance(result, dict) and result.get("status") == "success" else []
             if not articles:
                 st.info(f"No recent news found for {name}.")
-                continue
-            for article in articles:
-                title = first_value(article, "title", default="Untitled article")
-                description = first_value(article, "description", default="No description available.")
-                source = first_value(article, "source", default="Unknown source")
-                if isinstance(source, dict):
-                    source = source.get("name") or source.get("source_name") or "Unknown source"
-                published = first_value(article, "published_at", "publishedAt", default="Date unavailable")
-                url = first_value(article, "url")
-                article_link = ('<a href="' + esc(url) + '" target="_blank" style="color:#60a5fa;font-size:13px;font-weight:700;text-decoration:none;">Read article ↗</a>') if url else ''
-                st.html(f'<div class="news-card"><div style="font-size:18px;font-weight:750;line-height:1.4;color:#fff;margin-bottom:10px;">{esc(title)}</div><div class="tiny">{esc(source)} • {esc(published)}</div><div style="font-size:13px;line-height:1.7;color:#9aa8bb;margin-top:12px;margin-bottom:12px;">{esc(description)}</div>{article_link}</div>')
+            else:
+                for article in articles:
+                    title = first_value(article, "title", default="Untitled article")
+                    description = first_value(article, "description", default="No description available.")
+                    source = first_value(article, "source", default="Unknown source")
+                    if isinstance(source, dict):
+                        source = source.get("name") or source.get("source_name") or "Unknown source"
+                    published = first_value(article, "published_at", "publishedAt", default="Date unavailable")
+                    url = first_value(article, "url")
+                    article_link = ('<a href="' + esc(url) + '" target="_blank" style="color:#60a5fa;font-size:13px;font-weight:700;text-decoration:none;">Read article ↗</a>') if url else ''
+                    st.html(f'<div class="news-card"><div style="font-size:18px;font-weight:750;line-height:1.4;color:#fff;margin-bottom:10px;">{esc(title)}</div><div class="tiny">{esc(source)} • {esc(published)}</div><div style="font-size:13px;line-height:1.7;color:#9aa8bb;margin-top:12px;margin-bottom:12px;">{esc(description)}</div>{article_link}</div>')
 
-        # Team social is a separate feed from news.
-        st.html('<div class="section-title">📱 Team social</div>')
-        for team in teams:
-            name = team.get("name")
-            with st.expander(name, expanded=False):
-                try:
-                    result = get_team_social(user_id, name, 10)
-                    render_social_items(result.get("social", []) if isinstance(result, dict) else [], "Team social")
-                except Exception as error:
-                    st.error(f"Could not load social posts for {name}: {error}")
+        # Team social is kept aligned with the currently selected team.
+        st.html(f'<div class="section-title">📱 {esc(name)} social</div>')
+        with st.expander(f"{name} social feed", expanded=True):
+            try:
+                result = get_team_social(user_id, name, 10)
+                render_social_items(result.get("social", []) if isinstance(result, dict) else [], "Team social")
+            except Exception:
+                st.html(
+                    f'<div class="fixture-error-card">'
+                    f'<div class="fixture-error-title">Social feed temporarily unavailable</div>'
+                    f'<div class="fixture-error-text">Could not load social posts for {esc(name)}. Please try again in a moment.</div>'
+                    f'</div>'
+                )
 
 
 # =========================================================
